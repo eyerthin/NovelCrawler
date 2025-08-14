@@ -3,13 +3,13 @@ from typing import Optional
 
 from playwright.async_api import async_playwright
 
-from novel import ChapterCrawler
+from novel import NovelCrawler
 
 
-crawler: Optional[ChapterCrawler] = None
+crawler: Optional[NovelCrawler] = None
 async def main():
     global crawler
-    crawler = ChapterCrawler()
+    crawler = NovelCrawler()
     await crawler.start()
 
 if __name__ == "__main__":
