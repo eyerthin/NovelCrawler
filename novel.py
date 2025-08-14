@@ -11,6 +11,8 @@ from playwright.async_api import (
 )
 
 from base import AbstractNovelCrawler
+from store.store_text import ChapterStore
+
 
 class ChapterCrawler(AbstractNovelCrawler):
     context_page: Page
@@ -27,7 +29,7 @@ class ChapterCrawler(AbstractNovelCrawler):
             await self.context_page.goto(self.index_url)
             await self.search()
 
-    async def search(self) -> dict[str, str]:
+    async def search(self) -> None:
         """搜索小说地图，每本小说的名字及其链接
 
         Returns:
@@ -44,12 +46,13 @@ class ChapterCrawler(AbstractNovelCrawler):
         for locator in chapter_locators:
             title = await locator.text_content()
             # 相当于 BeautifulSoup 的 get_text()
-            url = await locator.get_attribute("href")
+            url = self.index_url + str(await locator.get_attribute("href"))
             # 相当于 BeautifulSoup 的 ["href"]
 
             self.chapters.update({title: url})
-        return self.chapters
-    
+        if self.chapters:
+            await ChapterStore().save_dict_to_txt(self.chapters)
+
     async def launch_browser(self, chromium: BrowserType, user_agent: Optional[str], headless: bool = True) -> BrowserContext:
         browser_context = await chromium.launch_persistent_context(
             user_data_dir="data",
