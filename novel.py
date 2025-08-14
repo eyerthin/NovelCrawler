@@ -11,8 +11,9 @@ from playwright.async_api import (
 )
 
 from base import AbstractNovelCrawler
-from store.store_novel_info import ChapterStore
-from constant.constant import Chapterinfo
+from store.store_novel_info import NovelsStore
+from store.store_content import NovelStore
+from model.model import Novelsinfo, NovelInfo
 
 class NovelCrawler(AbstractNovelCrawler):
     context_page: Page
@@ -38,7 +39,7 @@ class NovelCrawler(AbstractNovelCrawler):
         # todo: 同时获取对应小说类型
         
         while True:
-            self.chapters_info: list[Chapterinfo] = []
+            self.chapters_info: list[Novelsinfo] = []
             await self.context_page.wait_for_load_state()
             current_page = await self.context_page.locator("body > div.header > span").text_content()
             print(f"正在下载{current_page}")
@@ -46,7 +47,7 @@ class NovelCrawler(AbstractNovelCrawler):
 
             self.chapters_info = await self.get_novels_fast()
             if self.chapters_info:
-                await ChapterStore().save_chapterinfo(self.chapters_info)
+                await NovelsStore().save_chapterinfo(self.chapters_info)
             if await self._has_next_page():
                 await self._goto_next_page(self.context_page)
             else:
@@ -65,8 +66,8 @@ class NovelCrawler(AbstractNovelCrawler):
         })
         """
         , self.index_url)
-        return [Chapterinfo(**data) for data in all_data]
-    async def _goto_next_page(self, page: Page) -> Optional[Page]:
+        return [Novelsinfo(**data) for data in all_data]
+    async def _goto_next_page(self, page: Page):
         """跳转到下一页"""
         await page.click("div.page a:text('>')")
 
@@ -83,21 +84,51 @@ class NovelCrawler(AbstractNovelCrawler):
         return browser_context
 
 
-class ChapterCrawler(AbstractNovelCrawler):
+class ChapterCrawler(NovelCrawler):
     def __init__(self, index_url) -> None:
+        super().__init__()
         self.index_url = index_url
 
     async def start(self):
         async with async_playwright() as p:
-            self.browser_context = await self.launch_browser(p.chromium, self.user_agent)
+            self.browser_context = await self.launch_browser(p.chromium, self.user_agent, headless=False)
             await self.browser_context.add_init_script(path="libs/stealth.min.js")
             self.context_page = await self.browser_context.new_page()
             await self.context_page.goto(self.index_url)
+            await self.get_meta_data()
             await self.search()
     
+    async def get_meta_data(self):
+        await self.context_page.wait_for_load_state()
+        title = await self.context_page.locator(".name").text_content()
+        author = await self.context_page.locator("body > div.books > div.book_info > div.book_box > dl > dd:nth-child(2) > span:nth-child(1)").text_content()
+        intro = await self.context_page.locator("body > div.books > div.book_about > dl > dd").text_content()
+        type = await self.context_page.locator("body > div.books > div.book_info > div.book_box > dl > dd:nth-child(2) > span:nth-child(2)").text_content()
+        wordsount = await self.context_page.locator("body > div.books > div.book_info > div.book_box > dl > dd:nth-child(3) > span:nth-child(2)").text_content()
+        updatetime = await self.context_page.locator("body > div.books > div.book_info > div.book_box > dl > dd:nth-child(4) > span").text_content()
+        status = await self.context_page.locator("body > div.books > div.book_info > div.book_box > dl > dd:nth-child(3) > span:nth-child(1)").text_content()
+        
+        self.meta_data: NovelInfo = NovelInfo(title=title, author=author, intro=intro, type=type, wordsount=wordsount, last_update=updatetime, status=status, index_url=self.index_url)
     async def search(self):
-        pass
-
+        await self.context_page.locator("body > div.books > div.book_more > a").click()
+        await self.context_page.wait_for_load_state()
+        await self.context_page.locator("body > div.book_last > dl > dd:nth-child(3) > a").click()
+        await self.context_page.wait_for_load_state()
+        while True:
+            chapter_name = await self.context_page.locator("#read > div.header > span").text_content()
+            print(f"正在下载章节: {chapter_name}")
+            content = await self.context_page.locator("#chaptercontent").text_content()
+            await NovelStore(self.meta_data.title).save_chapter(content)
+            if await self._has_next_page():
+                await self._goto_next_page(self.context_page)
+            else:
+                break
+            
+    async def _goto_next_page(self, page):
+        return await page.click("#pb_next")
+    
+    async def _has_next_page(self):
+        return await self.context_page.locator("#pb_next").count() > 0
     async def launch_browser(self, chromium: BrowserType, user_agent: Optional[str], headless: bool = True) -> BrowserContext:
         browser_context = await chromium.launch_persistent_context(
             user_data_dir="data",
