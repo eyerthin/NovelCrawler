@@ -1,6 +1,7 @@
 import aiofiles
 
 from base import AbstractStore
+from constant.constant import Chapterinfo
 
 class ChapterStore(AbstractStore):
     save_path: str = "save_data/chapter.txt"
@@ -12,5 +13,12 @@ class ChapterStore(AbstractStore):
                 for key, value in save_item.items():
                     await f.write(f"{key},{value}\n")
 
+    async def save_chapterinfo(self, chapterinfos: list[Chapterinfo]):
+        async with aiofiles.open(self.save_path, mode='a+', encoding='utf-8') as f:
+            f.fileno()
+            if await f.tell() == 0:
+                await f.write("title,url,type\n")
+            for chapterinfo in chapterinfos:
+                await f.write(f"{chapterinfo.title},{chapterinfo.url},{chapterinfo.type}\n")
     async def store(self):
         pass

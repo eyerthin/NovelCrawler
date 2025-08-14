@@ -11,8 +11,8 @@ from playwright.async_api import (
 )
 
 from base import AbstractNovelCrawler
-from store.store_text import ChapterStore
-
+from store.store_novel_info import ChapterStore
+from constant.constant import Chapterinfo
 
 class ChapterCrawler(AbstractNovelCrawler):
     context_page: Page
@@ -36,23 +36,40 @@ class ChapterCrawler(AbstractNovelCrawler):
             dict[str, str]: _description_
         """
         # todo: 同时获取对应小说类型
-        await self.context_page.wait_for_selector("body > div.header > span")
-       
-        # 使用 page.locator() 获取所有匹配的 a 标签
-        chapter_locators: list[Locator] = await self.context_page.locator("body > div.wrap.rank > div > ul > li > a").all()
-        # 或者写成 .wrap.rank li > a
         
-        self.chapters = {}
-        for locator in chapter_locators:
-            title = await locator.text_content()
-            # 相当于 BeautifulSoup 的 get_text()
-            url = self.index_url + str(await locator.get_attribute("href"))
-            # 相当于 BeautifulSoup 的 ["href"]
+        while True:
+            self.chapters_info: list[Chapterinfo] = []
+            await self.context_page.wait_for_load_state()
+            current_page = await self.context_page.locator("body > div.header > span").text_content()
+            print(f"正在下载{current_page}")
+            
 
-            self.chapters.update({title: url})
-        if self.chapters:
-            await ChapterStore().save_dict_to_txt(self.chapters)
+            # 使用 page.locator() 获取所有匹配的 a 标签
+            chapter_locators: list[Locator] = await self.context_page.locator("body > div.wrap.rank > div > ul > li").all()
+            # 或者写成 .wrap.rank li > a
+            for locator in chapter_locators:
+                title = await locator.locator('a').text_content()
+                # 相当于 BeautifulSoup 的 get_text()
+                url = self.index_url + str(await locator.locator('a').get_attribute("href"))
+                # 相当于 BeautifulSoup 的 ["href"]
+                chapter_type = await locator.locator('span').text_content()
 
+                self.chapters_info.append(Chapterinfo(title=title, url=url, type=chapter_type))
+
+            if self.chapters_info:
+                await ChapterStore().save_chapterinfo(self.chapters_info)
+            if await self._has_next_page():
+                await self._goto_next_page(self.context_page)
+            else:
+                break
+    async def _goto_next_page(self, page: Page) -> Optional[Page]:
+        """跳转到下一页"""
+        await page.click("div.page a:text('>')")
+
+    async def _has_next_page(self) -> bool:
+        """判断是否有下一页"""
+        return await self.context_page.locator("div.page a:text('>')").count() > 0
+    
     async def launch_browser(self, chromium: BrowserType, user_agent: Optional[str], headless: bool = True) -> BrowserContext:
         browser_context = await chromium.launch_persistent_context(
             user_data_dir="data",
